@@ -1,0 +1,1878 @@
+
+<!DOCTYPE html>
+<html lang="en" dir="ltr" prefix="og: http://ogp.me/ns#">
+<head>
+
+
+
+<meta charset="UTF-8">
+<link rel="preload stylesheet" as="font"
+    href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;600;700&display=swap"
+    crossorigin>
+<link rel="stylesheet" as="font"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+<link rel="preload" as="style" id="style" href="https://ikdao.org/files/css/app.css">
+<link rel="stylesheet" as="style" id="style" href="https://ikdao.org/files/css/app.css">
+<!-- Google tag (gtag.js) Ikdao -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-Z6F7GP9NPV"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+    gtag('consent', 'default', {
+    'ad_user_data': 'denied',
+    'ad_personalization': 'denied',
+    'ad_storage': 'denied',
+    'analytics_storage': 'denied',
+    'wait_for_update': 500,
+  });
+  gtag('js', new Date());
+
+  gtag('config', 'G-Z6F7GP9NPV');
+</script>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2138737305842488"
+crossorigin="anonymous"></script>
+<script type="module">
+// HYP UI Framework
+
+// Zero One One License - 011sl
+// https://legal/ikdao.org/license/011sl
+// Hyp UI Framework - [Hemang Tewari]
+
+// HYP Organ Factory h()
+// --- 1. Hyperscript h() ---
+
+export const h = (ty, prp, ...chd) => {
+    if (prp == null || typeof prp !== "object" || Array.isArray(prp)) {
+        chd.unshift(prp);
+        prp = {};
+    }
+
+    const flatChildren = [];
+    const flatten = (arr) => {
+        for (const c of arr) {
+            if (c == null || c === false) continue;
+
+            if (Array.isArray(c)) {
+                flatten(c);
+            }
+            else if (c instanceof Actor) {
+                flatChildren.push(c);
+            }
+            else if (typeof c === "string" || typeof c === "number" || typeof c === "boolean") {
+                flatChildren.push(String(c));
+            }
+            else if (typeof c === "object" && c.ty) {
+                flatChildren.push(c);
+            }
+            else if (typeof c === "function") {
+                flatChildren.push(c());
+            }
+            else {
+                flatChildren.push(String(c));
+            }
+        }
+    };
+    flatten(chd);
+
+    if (typeof ty === "function") {
+        return ty({ ...prp, children: flatChildren });
+    }
+    return {
+        ty,
+        prp,
+        chd: flatChildren,
+        key: prp.key ?? null,
+        ref: prp.ref ?? null,
+    };
+};
+
+// HYP Triad Architectural Pattern
+// spatial/temporal/execution
+
+//  SCHEDULER (s)    
+//  Temporal Layer — queues & runs tasks efficiently    
+
+export const s = (function () {
+    const left = new Set();
+    let flushing = false;
+
+    function flush() {
+        flushing = false;
+        const tasks = Array.from(left);
+        left.clear();
+        for (const task of tasks) {
+            try { task.fn(); }
+            catch (err) { console.error("Scheduler task error:", err); }
+        }
+    }
+
+    return {
+        add(fn, ei) {
+            if (ei && !o.isAlive(ei)) return;
+            left.add({ fn, ei });
+            if (!flushing) {
+                queueMicrotask(flush);
+                flushing = true;
+            }
+        },
+
+        flush() { flush(); },
+
+        clear(ei) {
+            for (const task of [...left]) {
+                if (task.ei === ei) left.delete(task);
+            }
+        }
+    };
+})();
+
+//  ORGANISER (o)    
+//  Structural Layer — Organise Organs, keep identities and map
+
+export const o = (function () {
+    const organs = new Map();
+    let nextEi = 1;
+
+    function newEi() { return "ei_" + nextEi++; }
+
+    return {
+        create(hi, body) {
+            const ei = newEi();
+            organs.set(ei, {
+                hi,
+                body,
+                ctx: new Map(),
+                mounted: true,
+                lifecycles: {
+                    willMount: [], didMount: [],
+                    willUpdate: [], didUpdate: [],
+                    willUnmount: [], didUnmount: []
+                },
+                effects: new Set()
+            });
+            return ei;
+        },
+        addLifecycle(ei, phase, fn) {
+            const inst = organs.get(ei);
+            if (inst) inst.lifecycles[phase].push(fn);
+        },
+        runLifecycle(ei, phase, bodyRef) {
+            const inst = organs.get(ei);
+            if (!inst) return;
+            const list = inst.lifecycles[phase];
+            if (!list) return;
+            for (const fn of list)
+                s.add(() => fn(bodyRef), ei);
+        },
+        addEffect(ei, clear) {
+            const inst = organs.get(ei);
+            if (inst) inst.effects.add({ clear });
+        },
+        destroy(ei, { runLifecycle = true } = {}) {
+            const inst = organs.get(ei);
+            if (!inst) return;
+
+            inst.mounted = false;
+
+            if (runLifecycle) {
+                this.runLifecycle(ei, "willUnmount");
+                s.add(() => this.runLifecycle(ei, "didUnmount"), ei);
+            }
+
+            if (inst.effects) {
+                for (const ef of inst.effects)
+                    if (typeof ef.clear === "function") {
+                        try { ef.clear(); }
+                        catch (err) { console.error("Effect clear error:", err); }
+                    }
+            }
+            organs.delete(ei);
+            s.clear(ei);
+        },
+        get(ei) { return organs.get(ei); },
+        has(ei) { return organs.has(ei); },
+        isAlive(ei) {
+            const inst = organs.get(ei);
+            return inst ? inst.mounted : false;
+        },
+        all() { return organs; }
+    };
+})();
+
+// executor e()
+// EI execution identity/instance
+// render/update/unmount
+
+export const e = (function () {
+    const execStack = [];
+
+    function pushEI(ei) { execStack.push(ei); }
+    function popEI() { execStack.pop(); }
+    function currentEI() { return execStack[execStack.length - 1] || null; }
+
+    function render(vnode, body) {
+        const hi = vnode?.ty?.name || vnode?.ty || "anonymous";
+        const ei = o.create(hi, body);
+        pushEI(ei);
+        o.runLifecycle(ei, "willMount");
+        const dom = createDom(vnode, ei);
+        if (body) body.appendChild(dom);
+        s.add(() => o.runLifecycle(ei, "didMount"), ei);
+        popEI();
+        return ei;
+    }
+
+    function patch(dom, oldVNode, newVNode, ei) {
+        if (!dom || !o.isAlive(ei)) return;
+        pushEI(ei);
+        o.runLifecycle(ei, "willUpdate");
+
+        if (oldVNode.ty !== newVNode.ty || oldVNode.key !== newVNode.key) {
+            const newDom = createDom(newVNode, ei);
+            dom.replaceWith(newDom);
+            s.add(() => o.runLifecycle(ei, "didUpdate"), ei);
+            popEI();
+            return newDom;
+        }
+
+        if (oldVNode instanceof Actor && newVNode instanceof Actor) {
+            dom.data = newVNode.get();
+            s.add(() => o.runLifecycle(ei, "didUpdate"), ei);
+            popEI();
+            return dom;
+        }
+        if ((typeof oldVNode === "string" || typeof oldVNode === "number") &&
+            (typeof newVNode === "string" || typeof newVNode === "number")) {
+            const newVal = String(newVNode);
+            if (dom.data !== newVal) dom.data = newVal;
+            s.add(() => o.runLifecycle(ei, "didUpdate"), ei);
+            popEI();
+            return dom;
+        }
+        updateprps(dom, oldVNode.prp || {}, newVNode.prp || {});
+        patchChildren(dom, oldVNode.chd || [], newVNode.chd || [], ei);
+
+        if (newVNode.ref) newVNode.ref(dom);
+        s.add(() => o.runLifecycle(ei, "didUpdate"), ei);
+        popEI();
+
+        return dom;
+    }
+
+    function unmount(vnode = null, ei) {
+        const inst = o.get(ei);
+        if (!inst) return;
+        pushEI(ei);
+        const bodyRef = inst.body;
+
+        o.runLifecycle(ei, "willUnmount");
+        if (bodyRef?.parentNode)
+            bodyRef.parentNode.removeChild(bodyRef);
+
+        s.add(() => o.runLifecycle(ei, "didUnmount", bodyRef), ei);
+
+        o.destroy(ei, { runLifecycle: false });
+        popEI();
+    }
+
+
+    function createDom(v, ei) {
+        // null or primitive → text node  
+        if (v == null) return document.createTextNode("");
+        if (typeof v === "string" || typeof v === "number")
+            return document.createTextNode(String(v));
+
+        // Reactive text node (Actor or dA)  
+        if (v instanceof Actor) {
+            const textNode = document.createTextNode(v.get());
+            const update = () => { textNode.data = v.get(); };
+            const unsub = v.subscribe(update);
+            // tie cleanup to organiser (o)  
+            if (ei) o.addEffect(ei, unsub);
+            return textNode;
+        }
+
+        const el = document.createElement(v.ty);
+
+        for (const [k, val] of Object.entries(v.prp || {})) {
+            if (k.startsWith("on") && typeof val === "function") {
+                el.addEventListener(k.slice(2).toLowerCase(), val);
+                continue;
+            }
+            if (k === "style" && typeof val === "object") {
+                for (const [sk, sv] of Object.entries(val)) {
+                    if (sv instanceof Actor) {
+                        const updateStyle = () => { el.style[sk] = sv.get(); };
+                        updateStyle();
+                        const unsub = sv.subscribe(updateStyle);
+                        if (ei) o.addEffect(ei, unsub);
+                    } else {
+                        el.style[sk] = sv;
+                    }
+                }
+                continue;
+            }
+            if (val instanceof Actor) {
+                const updateAttr = () => {
+                    const next = val.get();
+                    if (k in el) el[k] = next;
+                    else el.setAttribute(k, next);
+                };
+                updateAttr();
+                const unsub = val.subscribe(updateAttr);
+                if (ei) o.addEffect(ei, unsub);
+                continue;
+            }
+
+            if (k in el) el[k] = val;
+            else el.setAttribute(k, val);
+        }
+
+        (v.chd || []).forEach(ch => {
+            el.appendChild(createDom(ch, ei));
+        });
+
+        if (v.ref) v.ref(el);
+
+        return el;
+    }
+
+    function updateprps(dom, oldprps, newprps) {
+        for (const k in oldprps) {
+            if (!(k in newprps)) {
+                if (k.startsWith("on") && typeof oldprps[k] === "function")
+                    dom.removeEventListener(k.slice(2).toLowerCase(), oldprps[k]);
+                else
+                    dom.removeAttribute(k);
+            }
+        }
+
+        for (const [k, v] of Object.entries(newprps)) {
+            if (oldprps[k] !== v) {
+                if (k.startsWith("on") && typeof v === "function") {
+                    if (oldprps[k]) dom.removeEventListener(k.slice(2).toLowerCase(), oldprps[k]);
+                    dom.addEventListener(k.slice(2).toLowerCase(), v);
+                } else {
+                    dom.setAttribute(k, v);
+                }
+            }
+        }
+    }
+
+    function patchChildren(dom, oldCh, newCh, ei) {
+        const oldKeyed = new Map();
+        const usedIndices = new Set();
+
+        oldCh.forEach((c, i) => {
+            if (c && c.key != null) oldKeyed.set(c.key, { vnode: c, index: i });
+        });
+
+        newCh.forEach((nV, newIndex) => {
+            let matched;
+            const oldNode = dom.childNodes[newIndex];
+
+            if (nV.key != null) {
+                matched = oldKeyed.get(nV.key);
+                if (matched) {
+                    const childNode = dom.childNodes[matched.index];
+                    patch(childNode, matched.vnode, nV, ei);
+                    usedIndices.add(matched.index);
+
+                    const refNode = dom.childNodes[newIndex] || null;
+                    if (childNode !== refNode) dom.insertBefore(childNode, refNode);
+                    return;
+                } else {
+                    const el = createDom(nV, ei);
+                    const refNode = dom.childNodes[newIndex] || null;
+                    dom.insertBefore(el, refNode);
+                    return;
+                }
+            }
+
+            if (nV instanceof Actor) {
+                if (oldNode && oldCh[newIndex] instanceof Actor) {
+                    // update text node directly
+                    oldNode.data = nV.get();
+                } else {
+                    const newNode = createDom(nV, ei);
+                    if (oldNode) dom.replaceChild(newNode, oldNode);
+                    else dom.appendChild(newNode);
+                }
+                return;
+            }
+
+            // Normal patching for primitives/elements
+            if (oldNode && !usedIndices.has(newIndex)) {
+                patch(oldNode, oldCh[newIndex], nV, ei);
+            } else if (!oldNode) {
+                dom.appendChild(createDom(nV, ei));
+            }
+
+            // update ref if present
+            if (nV.ref) {
+                const currentNode = dom.childNodes[newIndex];
+                if (currentNode) nV.ref(currentNode);
+            }
+        });
+
+        // remove excess old nodes
+        for (let i = oldCh.length - 1; i >= 0; i--) {
+            const oV = oldCh[i];
+            if (!usedIndices.has(i) && (!oV.key || !newCh.find(n => n.key === oV.key))) {
+                const node = dom.childNodes[i];
+                if (node) dom.removeChild(node);
+            }
+        }
+    }
+
+    return { render, patch, unmount, pushEI, popEI, currentEI };
+})();
+
+// Active/Reactive/Interactive Parts
+
+// Actor a() 
+let tr = null;
+export class Actor {
+    constructor(initial) {
+        this.value = initial;
+        this.subs = new Set();
+    }
+    get() {
+        if (tr) this.subs.add(tr);
+        return this.value;
+    }
+    set(next) {
+        if (next === this.value) return;
+        this.value = next;
+        this.subs.forEach(fn => s.add(fn));
+    }
+    subscribe(fn) {
+        this.subs.add(fn);
+        return () => this.subs.delete(fn);
+    }
+}
+export const a = (initial) => new Actor(initial);
+
+// Derived Act dA()
+export const dA = (compute) => {
+    const sig = a();
+    const recompute = () => {
+        tr = recompute;
+        const val = compute();
+        tr = null;
+        sig.set(val);
+    };
+    recompute();
+    return sig;
+};
+
+// Side Act sA()
+export const sA = (effect, depsFn = null, explicitEI = null) => {
+    const ei = explicitEI ?? e.currentEI(); // fallback to currentEI
+    if (!ei) return;
+    const inst = o.get(ei);
+    if (!inst) return;
+
+    if (!inst.ctx.has('sA-hooks')) inst.ctx.set('sA-hooks', new Map());
+    const hk = inst.ctx.get('sA-hooks');
+    const key = `sA-${hk.size}`;
+
+    const isEqualDeps = (a, b) => {
+        if (!a || !b || a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (!Object.is(a[i], b[i])) return false;
+        }
+        return true;
+    };
+    let unsubscribers = [];
+    const run = () => {
+        tr = run;
+        const deps = depsFn ? depsFn() : [];
+        tr = null;
+
+        const prev = hk.get(key);
+        const changed = !prev || !isEqualDeps(deps, prev.deps);
+
+        if (changed) {
+            // cleanup previous effect and Actor subscriptions
+            prev?.clear?.();
+            unsubscribers.forEach(u => u());
+            unsubscribers = [];
+
+            // run effect
+            const clear = effect();
+            hk.set(key, { deps, clear });
+            if (clear) inst.effects.add({ clear });
+
+            // auto re-run if any Actor deps change
+            for (const d of deps) {
+                if (d instanceof Actor) {
+                    const unsub = d.subscribe(() => s.add(run, ei));
+                    unsubscribers.push(unsub);
+                    if (ei) o.addEffect(ei, unsub);
+                }
+            }
+        }
+    };
+    run();
+    s.add(run, ei);
+};
+const HYP = { h, e, o, s, a, sA, dA };
+window.HYP = HYP;
+export default HYP;
+    
+</script>
+
+
+<script type="module">
+// =======================
+// api.js
+// =======================
+
+async function fetchJson(url, opts = {}) {
+  const res = await fetch(url, {
+    credentials: 'include',
+    headers: { Accept: 'application/json', ...(opts.headers || {}) },
+    ...opts,
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}: ${res.statusText}`);
+  return await res.json();
+}
+
+function mapSingle(data, prefix) {
+  if (!data) return null;
+  return Object.fromEntries(
+    Object.entries(data)
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([k, v]) => [k.slice(prefix.length), v])
+  );
+}
+
+function mapList(list, prefix) {
+  if (!Array.isArray(list)) return [];
+  return list.map(item => mapSingle(item, prefix));
+}
+
+export const api = {
+  me: {
+    async get() {
+      const res = await fetchJson('https://ikdao.org/rest/i/me');
+      return res?.data || {}; // normalized: return plain data object
+    },
+    async patch(updates) {
+      const res = await fetchJson('https://ikdao.org/rest/i/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      return res?.data || {}; // return updated data directly
+    },
+  },
+
+  it: {
+    async get(id) {
+      const res = await fetchJson(`https://ikdao.org/rest/i/it?id=${encodeURIComponent(id)}`);
+      return mapSingle(res, 'it.') || res;
+    },
+    async list(ids) {
+      if (!Array.isArray(ids)) ids = String(ids).split(',').filter(Boolean);
+      const query = ids.join(',');
+      const res = await fetchJson(`https://ikdao.org/rest/i/its?id=${encodeURIComponent(query)}`);
+      return mapList(res, 'its.');
+    },
+  },
+
+  u: {
+    async get(id) {
+      const res = await fetchJson(`https://ikdao.org/rest/i/u?id=${encodeURIComponent(id)}`);
+      return mapSingle(res, 'u.') || res;
+    },
+    async list(ids) {
+      if (!Array.isArray(ids)) ids = String(ids).split(',').filter(Boolean);
+      const query = ids.join(',');
+      const res = await fetchJson(`https://ikdao.org/rest/i/us?id=${encodeURIComponent(query)}`);
+      return mapList(res, 'us.');
+    },
+  },
+};
+
+// =======================
+// sync.js
+// =======================
+
+// Reactive store
+export const me = HYP.a({});
+
+// ------------------------
+// Helpers
+// ------------------------
+function parseValues(val) {
+  return typeof val === 'string' ? val.split(/[-,]/).filter(Boolean) : [];
+}
+
+function setElValue(el, val) {
+  if (el.dataset.attr) {
+    el.dataset.attr.split(',').forEach(attr => el.setAttribute(attr.trim(), val));
+  } else if (el.type === 'checkbox') {
+    el.checked = !!val && val !== '0' && val !== 'false';
+  } else if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) {
+    el.value = val ?? '';
+  } else {
+    el.textContent = val ?? '';
+  }
+}
+
+// ------------------------
+// Cache for related API lookups
+// ------------------------
+const cache = {
+  it: new Map(),
+  its: new Map(),
+  u: new Map(),
+  us: new Map(),
+};
+
+// ------------------------
+// Fetch related IDs
+// ------------------------
+async function fetchRelatedValue(source, idString) {
+  if (!idString) return '';
+  const ids = parseValues(idString);
+  if (!ids.length) return '';
+
+  try {
+    switch (source) {
+      case 'it':
+        if (cache.it.has(ids[0])) return cache.it.get(ids[0]);
+        const it = await api.it.get(ids[0]);
+        const itName = it?.name || ids[0];
+        cache.it.set(ids[0], itName);
+        return itName;
+
+      case 'its':
+        const missingIts = ids.filter(id => !cache.its.has(id));
+        let itsList = [];
+        if (missingIts.length) {
+          const fetched = await api.it.list(missingIts);
+          fetched.forEach((item, i) => {
+            const name = item?.name || missingIts[i];
+            cache.its.set(missingIts[i], name);
+          });
+        }
+        itsList = ids.map(id => cache.its.get(id)).filter(Boolean);
+        return itsList.join(', ');
+
+      case 'u':
+        if (cache.u.has(ids[0])) return cache.u.get(ids[0]);
+        const u = await api.u.get(ids[0]);
+        const uName = u?.fullname || u?.username || ids[0];
+        cache.u.set(ids[0], uName);
+        return uName;
+
+      case 'us':
+        const missingUs = ids.filter(id => !cache.us.has(id));
+        let usList = [];
+        if (missingUs.length) {
+          const fetchedUs = await api.u.list(missingUs);
+          fetchedUs.forEach((user, i) => {
+            const name = user?.fullname || user?.username || missingUs[i];
+            cache.us.set(missingUs[i], name);
+          });
+        }
+        usList = ids.map(id => cache.us.get(id)).filter(Boolean);
+        return usList.join(', ');
+
+      default:
+        return idString;
+    }
+  } catch (err) {
+    console.error(`Failed to fetch ${source} for ids:`, ids, err);
+    return idString;
+  }
+}
+
+// ------------------------
+// Refresh DOM
+// ------------------------
+async function refreshDomValues(container) {
+  const profile = me.get();
+  const elements = Array.from(container.querySelectorAll('[data-key]'));
+
+  await Promise.all(elements.map(async el => {
+    const key = el.dataset.key;
+    if (!(key in profile)) return;
+
+    const val = profile[key];
+    const source = el.dataset.source;
+
+    if (source) {
+      setElValue(el, 'Loading...');
+      const resolved = await fetchRelatedValue(source, val);
+      setElValue(el, resolved);
+    } else {
+      setElValue(el, val);
+    }
+  }));
+
+  updateSyncsUI();
+}
+
+// ------------------------
+// Update syncs
+// ------------------------
+function updateSyncsUI() {
+  document.querySelectorAll('[syncs]').forEach(el => {
+    const key = el.getAttribute('name') || el.dataset.key;
+    const value = String(el.dataset.value).trim();
+    const arr = parseValues(me.get()[key]);
+    el.classList.toggle('active', arr.includes(value));
+  });
+}
+
+// ------------------------
+// Input sync
+// ------------------------
+async function handleSyncInput(el) {
+  const key = el.getAttribute('name') || el.dataset.key;
+  if (!key) return;
+
+  const val = el.type === 'checkbox' ? (el.checked ? 1 : 0) : (el.value || null);
+  el.classList.remove('synced', 'error');
+  el.classList.add('syncing');
+
+  try {
+    const updated = await api.me.patch({ [key]: val });
+    me.set(updated);
+    el.classList.remove('syncing');
+    el.classList.add('synced');
+    setTimeout(() => el.classList.remove('synced'), 1000);
+    await refreshDomValues(document);
+  } catch (err) {
+    el.classList.remove('syncing');
+    el.classList.add('error');
+    console.error('Sync failed:', err);
+  }
+}
+
+// ------------------------
+// Syncs click handler
+// ------------------------
+async function handleSyncsClick(el) {
+  const key = el.getAttribute('name') || el.dataset.key;
+  const value = el.dataset.value;
+  if (!key || !value) return;
+
+  let arr = parseValues(me.get()[key]);
+  const idx = arr.indexOf(value);
+  if (idx >= 0) arr.splice(idx, 1);
+  else arr.push(value);
+
+  const updatedVal = arr.join('-');
+  el.classList.add('syncing');
+
+  try {
+    const updated = await api.me.patch({ [key]: updatedVal });
+    me.set(updated);
+    el.classList.remove('syncing');
+    el.classList.add('synced');
+    setTimeout(() => el.classList.remove('synced'), 1000);
+    await refreshDomValues(document);
+  } catch (err) {
+    el.classList.remove('syncing');
+    el.classList.add('error');
+    console.error('Syncs failed:', err);
+  }
+}
+
+// ------------------------
+// Utilities
+// ------------------------
+function initCopy() {
+  document.addEventListener('click', e => {
+    const selector = e.target.getAttribute('data-copy');
+    if (!selector) return;
+    const target = document.querySelector(selector);
+    if (!target) return;
+    const text = target.value ?? target.textContent ?? '';
+    navigator.clipboard.writeText(text).then(() => {
+      target.classList.add('synced');
+      setTimeout(() => target.classList.remove('synced'), 1000);
+    });
+  });
+}
+
+function initKeyReset() {
+  const kid = (l = 36, s = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") => {
+    const e = crypto.getRandomValues(new Uint8Array(l));
+    return Array.from(e, b => s[b % s.length]).join('');
+  };
+  window.kid = kid;
+
+  document.addEventListener('click', e => {
+    if (e.target?.id !== 'resetkey') return;
+    e.preventDefault();
+    const el = document.getElementById('xkey');
+    if (!el) return;
+    el.value = kid();
+    handleSyncInput(el);
+  });
+}
+
+// ------------------------
+// Bootstrap
+// ------------------------
+export async function initSync() {
+  try {
+    const profile = await api.me.get();
+    me.set(profile);
+    await refreshDomValues(document);
+  } catch (err) {
+    console.error('Error loading profile:', err);
+  }
+
+  document.addEventListener('change', e => {
+    if (e.target?.hasAttribute('sync')) handleSyncInput(e.target);
+  });
+
+  document.addEventListener('click', e => {
+    if (e.target?.hasAttribute('syncs')) handleSyncsClick(e.target);
+  });
+
+  initCopy();
+  initKeyReset();
+
+  me.subscribe(async () => {
+    await refreshDomValues(document);
+  });
+}
+
+// ------------------------
+// Auto-init
+// ------------------------
+document.addEventListener('DOMContentLoaded', () => {
+  initSync();
+});
+
+// Expose globals
+window.api = api;
+window.me = me;
+window.it = api.it;
+window.its = api.it.list;
+window.u = api.u;
+window.us = api.u.list;
+window.initSync = initSync;
+window.handleSyncInput = handleSyncInput;
+window.handleSyncsClick = handleSyncsClick;
+window.refreshDomValues = refreshDomValues;
+window.updateSyncsUI = updateSyncsUI;
+
+    </script>
+        
+        <script type="module">
+    // Ikdao appData Object
+// appData.js
+
+// --- Meta helpers ---
+const meta = (selector, fallback = '') => {
+  const el = document.querySelector(selector);
+  return el ? el.content : fallback;
+};
+
+// --- Main appData object ---
+export const appData = {
+  homeInfo: {
+    host: window.location.hostname.split('.').slice(-2).join('.'),
+    name: "ikdao",
+    url: "https://ikdao.org",
+    singup: "",
+    signin: "",
+    meta: "Ikdao is an agency of creators, developers, and marketers working together to build digital autonomy.",
+    keyword: ["Ikdao", "creators", "developers", "agency", "autonomy", "ai", "research", "development"],
+    logo: "https://ikdao.org/files/img/logo.png",
+    icon: "https://ikdao.org/files/img/logo.svg",
+    fav: "https://ikdao.org/files/img/fav.svg",
+  },
+
+  siteInfo: {
+    host: window.location.hostname,
+    domain: me?.data?.photo ? `${appData.homeInfo}/me/${me.data.photo}` : "www",
+    name: meta('meta[property="og:site_name"]', 'Ikdao'),
+    url: window.location.origin,
+    meta: meta('meta[name="description"]', 'Ikdao - creators and developers agency'),
+    keyword: ["Ikdao", "creators", "developers", "agency", "autonomy"],
+    logo: "/files/img/logo.png",
+    icon: "/files/img/logo.svg",
+    fav: "/files/img/fav.svg",
+  },
+
+  pageInfo: {
+    url: it?.data?.link || window.location.href,
+    name: it?.data?.name || document.title,
+    meta: meta('meta[name="description"]', ''),
+    keyword: ["Ikdao", "creators", "developers", "agency", "autonomy"],
+    image: it?.data?.image ? `${homeLink}/files/${it.data.image}` : null,
+    person: it?.data?.person ? `${homeLink}/files/${it.data.person}` : null,
+  },
+
+  socLink: {
+    rssfeed: "/feed.xml",
+    twitter: "https://twitter.com/ikdao",
+    linkedin: "https://linkedin.com/company/ikdao",
+    github: "https://github.com/ikdao",
+    youtube: "https://youtube.com/@ikdao",
+    instagram: "https://instagram.com/ikdao"
+  },
+
+  nav: [
+    { name: "Home", path: "https://ikdao.org/" },
+    { name: "About", path: "https://ikdao.org/about" },
+    { name: "Projects", path: "https://ikdao.org/projects" },
+    { name: "Contact", path: "https://ikdao.org/contact" },
+    { name: "Privacy", path: "https://ikdao.org/privacy" },
+    { name: "Policy", path: "https://ikdao.org/policy" },
+    { name: "Sustainability", path: "https://ikdao.org/sustainability" },
+    { name: "Terms", path: "https://ikdao.org/terms" },
+    { name: "Sponsors", path: "https://ikdao.org/sponsors" },
+    { name: "Open Source", path: "https://ikdao.org/open-source" },
+    { name: "Legal", path: "https://legal.ikdao.org/" },
+    { name: "Help", path: "https://help.ikdao.org/" },
+  ],
+
+  plane: [
+    { name: "Self", path: "https://self.ikdao.org", logo: "https://self.ikdao.org/logo.png",  meta: "Ikdao Self - Unified Identity and Self Management platform", key: "self, identity management platform, self management platform" },
+    { name: "Legal", path: "https://legal.ikdao.org", logo: "https://legal.ikdao.org/logo.png",  meta: "", key: "" },
+    { name: "Map", path: "https://map.ikdao.org", logo: "https://map.ikdao.org/logo.png",  meta: "Ikdao Map - Find a place to eat, rest, sleep, repeat", key: "" },
+    { name: "Meet", path: "https://meet.ikdao.org", logo: "https://meet.ikdao.org/logo.png",  meta: "Meet People and Bots", key: "" },
+    { name: "Money", path: "https://money.ikdao.org", logo: "https://money.ikdao.org/logo.png",  meta: "", key: "" },
+    { name: "Market", path: "https://market.ikdao.org", logo: "https://market.ikdao.org/logo.png",  meta: "", key: "" },
+    { name: "Make", path: "https://make.ikdao.org", logo: "https://make.ikdao.org/logo.png",  meta: "Auto maker - create content from code, text, image, video, shapes, games", key: "" },
+    { name: "Move", path: "https://move.ikdao.org", logo: "https://move.ikdao.org/logo.png",  meta: "Ikdao Move - Auto Drives and auto pooling services", key: "" },
+  ],
+
+  tool: [
+    { name: "Ikdao Console", path: "https://www.ikdao.org/tool/console", logo: "https://ikdao.org/tool/console/console-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Contemplate", path: "https://www.ikdao.org/tool/contemplate", logo: "https://ikdao.org/tool/contemplate/contemplate-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Cognito", path: "https://www.ikdao.org/tool/cognito", logo: "https://ikdao.org/tool/cognito/cognito-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Calculator", path: "https://www.ikdao.org/tool/calculator", logo: "https://ikdao.org/tool/calculator/calculator-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Clock", path: "https://www.ikdao.org/tool/clock", logo: "https://ikdao.org/tool/clock/clock-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Climate", path: "https://www.ikdao.org/tool/climate", logo: "https://ikdao.org/tool/climate/climate-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Contact", path: "https://www.ikdao.org/tool/contact", logo: "https://ikdao.org/tool/contact/contact-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Calendar", path: "https://www.ikdao.org/tool/calendar", logo: "https://ikdao.org/tool/calendar/calendar-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Canvas", path: "https://www.ikdao.org/tool/canvas", logo: "https://ikdao.org/tool/canvas/canvas-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Coder", path: "https://www.ikdao.org/tool/coder", logo: "https://ikdao.org/tool/coder/coder-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Converter", path: "https://www.ikdao.org/tool/convertor", logo: "https://ikdao.org/tool/convertor/convertor-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Chess", path: "https://www.ikdao.org/tool/chess", logo: "https://ikdao.org/tool/chess/chess-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Chi", path: "https://www.ikdao.org/tool/chi", logo: "https://ikdao.org/tool/chi/chi-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Chance", path: "https://www.ikdao.org/tool/chance", logo: "https://ikdao.org/tool/chance/chance-logo.png",  meta: "", key: "" },
+    { name: "Ikdao QR Coder", path: "https://www.ikdao.org/tool/qr-coder", logo: "https://ikdao.org/tool/qr-coder/qr-coder-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Translator", path: "https://www.ikdao.org/tool/translator", logo: "https://ikdao.org/tool/translator/translator-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Text Maker", path: "https://www.ikdao.org/tool/text-maker", logo: "https://ikdao.org/tool/text-maker/text-maker-logo.png",  meta: "", key: "" },
+    { name: "Ikdao Image Maker", path: "https://www.ikdao.org/tool/image-maker", logo: "https://ikdao.org/tool/image-maker/image-maker-logo.png",  meta: "", key: "" },
+  ],
+};
+
+</script>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  let deferredPrompt;
+
+  // Register SW
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/tool/calculator/sw.js',{ scope: "/tool/calculator/" })
+      .then(reg => console.log('SW registered:', reg.scope))
+      .catch(err => console.error('SW registration failed:', err));
+  }
+
+  // Handle install prompt
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    deferredPrompt = e;
+    const installBtn = document.getElementById('menuInstall');
+    if (installBtn) installBtn.style.display = 'block';
+  });
+
+  document.getElementById('menuInstall')?.addEventListener('click', async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      console.log('Install choice:', choice.outcome);
+      deferredPrompt = null;
+      document.getElementById('menuInstall').style.display = 'none';
+    }
+  });
+
+  // Notifications
+  const notifyBtn = document.getElementById("menuNotify");
+  if (notifyBtn) {
+    notifyBtn.style.display = "block"; // show if hidden
+    notifyBtn.addEventListener("click", () => {
+      if ("Notification" in window && navigator.serviceWorker) {
+        Notification.requestPermission().then(permission => {
+          if (permission === "granted") {
+            console.log("Notifications allowed");
+            navigator.serviceWorker.getRegistration().then(reg => {
+              if (reg) {
+                reg.showNotification("Welcome!", {
+                  body: "You’ll now get updates.",
+                  icon: "/logo.png"
+                });
+              }
+            });
+          } else {
+            console.log("Notifications denied");
+          }
+        });
+      } else {
+        console.warn("Notifications not supported");
+      }
+    });
+  }
+});
+
+</script>
+
+
+<title>Calculator - ikdao</title>
+<link rel="canonical" href="https://ikdao.org/tool/calculator/">
+<link rel="icon" href="https://ikdao.org/tool/calculator/calculator-fav.svg">
+<link rel="manifest" href="https://ikdao.org/tool/calculator/pwa.json">
+<link rel="apple-touch-icon" href="https://ikdao.org/tool/calculator/calculator-logo.png">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="white" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="black" media="(prefers-color-scheme: dark)">
+<meta name="HandheldFriendly" content="True">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="description" content="">
+<meta name="author" content="">
+<meta name="robots" content="index, follow">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:site" content="ikdao">
+<meta name="twitter:creator" content="ikdao">
+<meta name="twitter:title" content="Calculator - Ikdao">
+<meta name="twitter:description" content="We are small team, who are independent, innovative, inventive, inquisitve and working in multiple domains and dimensions">
+<meta property="fb:app_id" content="243535457474024">
+<meta property="og:locale" content="en">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Calculator">
+<meta property="og:description" content="We are small team, who are independent, innovative, inventive, inquisitve and working in multiple domains and dimensions">
+<meta property="og:url" content="https://ikdao.org/">
+<meta property="og:site_name" content="Ikdao">
+<meta property="og:image" content="/tool/calculator/calculator-logo.png">
+
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "name": "",
+  "url": "https://ikdao.org/tool/calculator/",
+  "description": "",
+  "keyword":"",
+  "dateModified": "09-09-2025",
+  "datePublished": "29-12-2024",
+  "inLanguage": "",
+  "author": {
+    "@type": "Organization",
+    "name": "ikdao"
+  },
+  "mainEntity": {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "@id": "https://ikdao.org/tool/calculator/",
+    "name": "Calculator",
+    "url": "https://ikdao.org/tool/calculator//",
+    "image": "https://ikdao.org/tool/calculator//calculator-logo.png",
+    "description": "",
+  "dateModified": "09-09-2025",
+  "datePublished": "29-12-2024",
+    "author": {
+      "@type": "Organization",
+      "name": "ikdao",
+      "url": "https://ikdao.org"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "ikdao",
+      "url": "https://ikdao.org"
+    },
+    "applicationCategory": [
+      "Productivity",
+      "utilities"
+    ],
+    "applicationSubCategory": "calculator",
+    "applicationSuite": "Ikdao Tools",
+    "memoryRequirements": "32MB RAM",
+    "storageRequirements": "Less than 10MB",
+    "processorRequirements": [
+      "x86_64",
+      "i386",
+      "ARM",
+      "RISC-V"
+    ],
+    "operatingSystem": [
+      "macOS",
+      "iOS",
+      "Windows",
+      "Linux",
+      "Android",
+      "BSD"
+    ],
+    "carrierRequirements": "Any",
+    "browserRequirements": [
+      "Chrome",
+      "Firefox",
+      "Safari",
+      "Opera"
+    ],
+    "availableOnDevice": [
+      "Web",
+      "Mobile",
+      "Desktop",
+      "Console"
+    ],
+    "softwareRequirements": "operating system",
+    "softwareVersion": "1.0.0",
+    "softwareHelp": "https://help.ikdao.org/?",
+    "countriesSupported": "All",
+    "countriesNotSupported": "None",
+    "installUrl": "https://ikdao.org/tool/calculator/?install=1",
+    "fileSize": "~5MB",
+    "screenshot": "https://ikdao.org/tool/calculator/screenshot.png",
+    "featureList": [
+      "light",
+      "private",
+      "minimal",
+      "rich",
+      "webbed"
+    ]
+  }
+}
+</script>
+
+<script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "url": "https://ikdao.org/",
+        "name": "Ikdao",
+        "sameAs": "https://ikdao.org/feed.xml",
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": {
+                "@type": "EntryPoint",
+                "urlTemplate": "https://ikdao.org/q?search={query}"
+            },
+            "query-input": "required name=query"
+        }
+    }
+</script>
+<script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "url": "https://ikdao.org/",
+        "name": "ikdao",
+        "email": "contact@ikdao.org",
+        "sameAs": ["https://ikdao.org/feed.xml", "https://facebook.com/ikdao", "https://x.com/ikdao",
+            "https://instagram.com/", "https://pinterest.com/ikdaogroup",
+            "https://linkedin.com/company/ikdao"
+        ],
+        "logo": {
+            "@type": "ImageObject",
+            "name": "ikdao Logo",
+            "url": "https://ikdao.orgfiles/img/logo.png"
+        }
+    }
+</script>
+
+</head>
+<body>
+<span id="top"></span>
+<nav id="menu" class="menu clr ani-opq-5" hidden>
+<div class="bar">
+<button class="bar-item nd clr left crsr pale-red" id="netstate" hidden disabled><i
+    class="fa-solid fa-circle text-red" aria-hidden="true"></i> </button>
+ <button class="bar-item nd clr right crsr" onclick="tgl('menu')" id="menuoff"><span class="sr-only">Close
+Menu</span><i class="fa-solid fa-xmark fa-fw"></i></button>
+<!-- Theme Toggle Button -->
+<span class="bar-item nd clr right crsr" id="theme" aria-pressed="false">
+<select class="select fs080" id="theme-select" data-key="stheme" sync>
+  <option value="s">System</option>
+  <option value="d">Dark</option>
+  <option value="l">Light</option>
+</select>
+</span>
+
+
+<button class="bar-item nd clr right crsr" id="btnshare" title="Share this Page" onclick="share()"><span
+    class="sr-only">Share This Page</span><i class="fa-fw fa-solid fa-share" aria-hidden="true"></i></button>
+<a href="https://self.ikdao.org/signout" class="bar-item button right b-1" title="Sign Out">
+<i class="fa-solid fa-sign-out fa-fw"></i> Sign Out</a> <a href="https://self.ikdao.org/me" class="bar-item button right b-1" title="My Profile">
+<i class="fa-solid fa-user fa-fw"></i> My Profile</a> 
+
+</div>
+
+<div class="row block t-center">
+<div class="col l6 hide-medium hide-small hide-xs">
+<p></p>
+</div>
+<div class="col l12 menu-body t-center" id="menu-body">
+<a class="nd" href="https://ikdao.org"  title="Ikdao" >
+<img class="image" src="https://ikdao.org/files/img/logo.png" alt="Ikdao logo" height="32"
+width="32"><span class="button fs150 upper"> Ikdao</span>
+</a>
+
+<div class="fs080 t-center" id="dateweb"></div>
+
+<div class="bar-item container p-t-8 p-b-8">
+<form method="get" action="/q" enctype="text/plain" target="_top">
+<label class="sr-only" for="search-form-menu">Search</label>
+<input type="search" class="block bar-item input br-4" id="search-form-menu" value="" placeholder="Search"
+pattern="[a-zA-Z0-9_ ]+" required name="search">
+</form>
+</div>
+<hr class="block">
+<div class="row-padding p-t-16 p-b-16">
+    <div class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://self.ikdao.org/" title="ikdao self app - Identity, Accounts and self management app"> 
+         <div>  <img class="image" src="https://self.ikdao.org/logo.png" alt="ikdao Self App Logo" height="64" width="64">
+        <div>Self</div></div>
+        </a>
+    </div>
+    <div class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+              <a class="nd" href="https://map.ikdao.org/" title="Ikdao Maps and Navigations - A simple, private local, regional, global Maps, Find yourelf or any and all places at one place"> 
+         <div> <img class="image" src="https://map.ikdao.org/logo.png" alt="ikdao Map App Logo"  height="64" width="64">
+        <div>Map</div></div>
+        </a>
+    </div>
+    <div class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+        <a class="nd" href="https://money.ikdao.org/" title="Ikdao Money app - Mine, Mindt< manage personal, family or business finance"> 
+        <div><img class="image" src="https://money.ikdao.org/logo.png" alt="ikdao Money App Logo"  height="64" width="64">
+        <div>Money</div></div>
+        </a>
+    </div>
+    <div class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+                <a class="nd" href="https://market.ikdao.org/" title="Ikdao Market - Get All market data, information, insights, statistics,"> 
+        <div><img class="image" src="https://market.ikdao.org/logo.png" alt="Ikdao Market App Logo"  height="64" width="64">
+        <div>Market</div></div>
+        </a>
+        </div>
+    <div class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+                <a class="nd" href="https://make.ikdao.org/"> 
+        <div><img class="image" src="https://make.ikdao.org/logo.png" alt="Ikdao Make App Logo"  height="64" width="64">
+        <div>Make</div></div>
+        </a>
+    </div>
+</div>
+<hr class="block">
+<div class="panel fs090">
+<a href="https://ikdao.org/feed.xml" title="RSS Feed" class="button nd fa-solid fa-rss"></a>
+<a href="https://facebook.com/ikdao" title="Facebook" class="button nd fa-brands fa-facebook"></a>
+<a href="https://x.com/ikdao" title="Twitter" class="button nd fa-brands fa-x-twitter"></a>
+<a href="https://github.com/ikdao" title="Instagram" class="button nd fa-brands fa-github"></a>
+<a href="https://pinterest.com/ikdaogroup" title="Pinterest" class="button nd fa-brands fa-pinterest"></a>
+<a href="https://linkedin.com/company/ikdao" title="Linkedin" class="button nd fa-brands fa-linkedin"></a>
+
+</div>
+<div class="panel fs090 t-center">
+<button class="button t-center b-1 block m-b-16" id="menuinstall" style="display: none;"> <i class="fa-solid fa-mobile fa-fw"
+aria-hidden="true"></i> Install ikdao</button>
+
+<button class="button t-center b-1 block" onclick="clearCache()"><i class="fa-solid fa-eraser fa-fw"></i> Clear Cache</button>
+
+</div>
+<div class="panel fs080">
+<a href="https://ikdao.org/about" title='About Us' class='button nd '>About</a>
+<a href="https://ikdao.org/contact" title='Contact Us' class='button nd '>Contact</a>
+<a href="https://ikdao.org/policy#privacy" title='Our Privacy Policy' class='button nd '>Privacy</a>
+<a href="https://ikdao.org/policy" title='Our Policies' class='button nd '>Policy</a>
+<a href="https://ikdao.org/terms" title='Terms of Use' class='button nd '>Terms</a>
+
+</div>
+</div>
+<div class="col l6 hide-medium hide-small hide-xs">
+<p></p>
+</div>
+</div>
+
+</nav>
+
+<nav id="toolmenu" class="menu clr ani-opq-5" hidden>
+    <div class="bar">
+    <button class="bar-item button right b clr" onclick="tgl('toolmenu')" id="toolmenuoff"><span class="sr-only">Close
+    Menu</span><i class="fa-solid fa-xmark fa-fw"></i></button>
+    </div>
+    
+    <div class="row-padding block t-center">
+    <div class="col l6 hide-medium hide-small hide-xs">
+    <p></p>
+    </div>
+<div class="col l12 menu-body t-center" id="toolmenu-body">
+
+
+    <a class="nd" href="https://ikdao.org/tool/">
+        <img class="image" src="https://ikdao.org/files/img/logo.svg" alt="ikdao logo"
+            title="ikdao Tools" height="32" width="32"><span class="button fs150 upper"> ikdao
+            Tools</span>
+    </a>
+
+    <div class="bar-item container p-t-8 p-b-8">
+        <form method="get" action="" enctype="text/plain" target="_top">
+            <label class="sr-only" for="searchtool">Tool Search</label>
+            <input type="search" class="block bar-item input br-4" id="searchtool" value="" placeholder="Search Tools"
+                pattern="[a-zA-Z0-9_ ]+" required name="search">
+        </form>
+    </div>
+
+    <hr class="block">
+  <div class="row-padding" id="toollist">
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/calculator" title=""> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/calculator/calculator-logo.png" alt="" height="64" width="64">
+        <div>Calculator
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/clock" title="Ikdao Clock - Indic Lightweight Alternative Clock Application"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/clock/clock-logo.png" alt="Ikdao Clock - Indic Lightweight Alternative Clock Application" height="64" width="64">
+        <div>Clock
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/calendar" title="Ikdao Calendar"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/calendar/calendar-logo.png" alt="Ikdao Calendar" height="64" width="64">
+        <div>Calendar
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/climate" title="Ikdao Climate - Get Weather Reports, Forcasts, for a day, week"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/climate/climate-logo.png" alt="Ikdao Climate - Get Weather Reports, Forcasts, for a day, week" height="64" width="64">
+        <div>Climate
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/contemplate" title="Ikdao Contemplate - A Wholistic Indic, Indie and Free Meditation Tool for you"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/contemplate/contemplate-logo.png" alt="Ikdao Contemplate - A Wholistic Indic, Indie and Free Meditation Tool for you" height="64" width="64">
+        <div>Contemplate
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/contact" title=""> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/contact/contact-logo.png" alt="" height="64" width="64">
+        <div>Contact
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/copy" title="Copy - Carry Notes"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/copy/copy-logo.png" alt="Copy - Carry Notes" height="64" width="64">
+        <div>Copy
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/camera" title=""> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/camera/camera-logo.png" alt="" height="64" width="64">
+        <div>Camera
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/translator" title="Ikdao Translator - Translate 50+ languages on your device"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/translator/translator-logo.png" alt="Ikdao Translator - Translate 50+ languages on your device" height="64" width="64">
+        <div>Translator
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/coder" title="Ikdao Coder - A simple HTML, JS, CSS coding tool for anyone and everyone"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/coder/coder-logo.png" alt="Ikdao Coder - A simple HTML, JS, CSS coding tool for anyone and everyone" height="64" width="64">
+        <div>Coder
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/converter" title="Unit Convertor - Indic, Indie multi unit conversion tool"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/converter/converter-logo.png" alt="Unit Convertor - Indic, Indie multi unit conversion tool" height="64" width="64">
+        <div>Converter
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/chess" title="Play Game of Chess"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/chess/chess-logo.png" alt="Play Game of Chess" height="64" width="64">
+        <div>Chess
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/chi" title="Go Game"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/chi/chi-logo.png" alt="Go Game" height="64" width="64">
+        <div>Chi
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/chance" title="Play Game of Chance"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/chance/chance-logo.png" alt="Play Game of Chance" height="64" width="64">
+        <div>Chance
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/qr-coder" title=""> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/qr-coder/qr-coder-logo.png" alt="" height="64" width="64">
+        <div>QR Coder
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/cognito" title="Cognito -  A Indic, Alternative 2FA, TOTP, HOTP app"> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/cognito/cognito-logo.png" alt="Cognito -  A Indic, Alternative 2FA, TOTP, HOTP app" height="64" width="64">
+        <div>Cognito
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/text-maker" title=""> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/text-maker/text-maker-logo.png" alt="" height="64" width="64">
+        <div>Text Maker
+</div></div>
+        </a>
+    </div>
+<div search class="col l6 m8 s12 t-center vam block m-t-16 m-b-16">
+             <a class="nd" href="https://ikdao.org/tool/image-maker" title=""> 
+         <div>  <img class="img-clr" src="https://ikdao.org/tool/image-maker/image-maker-logo.png" alt="" height="64" width="64">
+        <div>Image Maker
+</div></div>
+        </a>
+    </div>
+</div>
+
+</div>
+
+
+    <div class="col l6 hide-medium hide-small hide-xs">
+    <p></p>
+    </div>
+
+    </div>
+    
+    </nav>
+
+<div class="stick-top block" id="topnav">
+
+<nav class="bar clr" aria-label="site main navigation">
+<a class="bar-image p-l-8 nd p-t-4" href="https://ikdao.org/tool/calculator//" title="Calculator">
+<img class=" img-clr" id="logo" src="https://ikdao.org/tool/calculator//calculator-logo.png" alt="Calculator" 
+width="30" height="30"> <span class="fs130 vam upper" title="Calculator">Calculator</span>
+</a>
+
+<button class="bar-item button clr nd right crsr" onclick="tgl('menu')"><span class="sr-only">Open Menu</span><i class="fa-solid fa-bars fa-fw"></i></button>
+<button class="bar-item button clr nd right crsr" onclick="tgl('toolmenu')"><span class="sr-only">Open Tools Menu</span><i class="fa-solid fa-toolbox fa-fw" aria-hidden="true"></i></button>
+
+</nav>
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  uiQ({ inputId:'searchtool', containerId:'toollist', onSelect: el => el.click() });
+});
+
+</script>
+<main class="main">
+<style>
+  #calculator { min-width: 300px; max-width:1600px; margin: 2rem auto; padding: 1rem; border: 1px solid #ccc; }
+  #display, #statdisplay { width: 100%; height: 3em; font-size: 1.5rem;  margin-bottom: 0.5rem; text-align: right; position: relative; cursor: pointer; user-select: all; }
+  #expression { position: absolute; top: 4px; right: 10px; font-size: 0.8rem; }
+  .buttons { display: flex; flex-wrap: wrap; }
+  button { flex: 1 0 20%; margin: 2px; padding: .8rem; font-size: 1rem; cursor: pointer; }
+  select, #angleMode { margin-bottom: 0.5rem; width: 100%; padding: 0.5rem; font-size: 1rem; }
+  #copiedModal {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background: #4caf50;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 5px;
+    display: none;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  }
+  .control-block {
+    display: flex;
+    justify-content: space-between;
+    margin: 0.5rem 0;
+  }
+  #bottomNav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    border-top: 1px solid #ccc;
+    display: flex;
+    justify-content: space-around;
+    padding: 0.5rem;
+  }
+</style>
+
+<div id="calculator">
+  <div style="position:relative">
+    <div id="expression"></div>
+    <input class="input" type="text" id="display" disabled onclick="copyToClipboard(this.value)" />
+  </div>
+  <input type="text" id="statdisplay" readonly style="display:none;" onclick="copyToClipboard(this.value)" />
+  <div id="operandButtons" class="buttons clr"></div>
+  <div class="control-block">
+    <button class=" clr" onclick="handleInput('=')">=</button>
+    <button class=" clr" onclick="handleInput('←')">←</button>
+    <button class=" clr" onclick="handleInput('C')">C</button>
+  </div>
+  <div id="operatorButtons" class="buttons"></div>
+</div>
+
+<div id="settingsPanel" style="display:none; padding: 1rem;">
+  <select class="select" id="mode">
+    <option value="simple">Simple</option>
+    <option value="scientific">Scientific</option>
+    <option value="statistics">Statistics</option>
+  </select>
+  <select class="select" id="numeral">
+    <option value="dec">Decimal</option>
+    <option value="hex">Hexadecimal</option>
+    <option value="oct">Octal</option>
+    <option value="bin">Binary</option>
+  </select>
+  <div id="angleModeContainer">
+    <select class="select" id="angleMode">
+      <option value="deg">Degrees</option>
+      <option value="rad">Radians</option>
+    </select>
+  </div>
+</div>
+
+<div class=" clr" id="historyPanel" style="display:none; padding: 1rem;"></div>
+<div id="copiedModal">Copied</div>
+<div id="bottomNav" class=" clr">
+  <button class=" clr" onclick="showPanel('calculator')">Home</button>
+  <button class=" clr" onclick="showPanel('historyPanel')">History</button>
+  <button class=" clr" onclick="showPanel('settingsPanel')">Settings</button>
+</div>
+
+<script>
+const display = document.getElementById("display");
+const statdisplay = document.getElementById("statdisplay");
+const operandButtons = document.getElementById("operandButtons");
+const operatorButtons = document.getElementById("operatorButtons");
+const mode = document.getElementById("mode");
+const numeral = document.getElementById("numeral");
+const angleMode = document.getElementById("angleMode");
+const expressionDisplay = document.getElementById("expression");
+
+let currentInput = "";
+let historyData = JSON.parse(localStorage.getItem("calcHistory") || "[]");
+let savedSettings = JSON.parse(localStorage.getItem("calcSettings") || "{}");
+
+if (savedSettings.mode) mode.value = savedSettings.mode;
+if (savedSettings.numeral) numeral.value = savedSettings.numeral;
+if (savedSettings.angleMode) angleMode.value = savedSettings.angleMode;
+
+document.getElementById("angleModeContainer").style.display = mode.value === 'scientific' ? 'block' : 'none';
+
+function saveSettings() {
+  localStorage.setItem("calcSettings", JSON.stringify({
+    mode: mode.value,
+    numeral: numeral.value,
+    angleMode: angleMode.value
+  }));
+}
+
+function showPanel(panelId) {
+  document.getElementById("calculator").style.display = panelId === 'calculator' ? 'block' : 'none';
+  document.getElementById("settingsPanel").style.display = panelId === 'settingsPanel' ? 'block' : 'none';
+  document.getElementById("historyPanel").style.display = panelId === 'historyPanel' ? 'block' : 'none';
+  if (panelId === 'historyPanel') renderHistory();
+}
+
+function addToHistory(expr, result) {
+  historyData.push({ expr, result });
+  if (historyData.length > 50) historyData.shift();
+  localStorage.setItem("calcHistory", JSON.stringify(historyData));
+}
+
+function renderHistory() {
+  const container = document.getElementById("historyPanel");
+  container.innerHTML = '<h3>History</h3>';
+  historyData.slice().reverse().forEach(entry => {
+    const div = document.createElement("div");
+    div.textContent = `${entry.expr} = ${entry.result}`;
+    container.appendChild(div);
+  });
+}
+
+const operands = ["0","1","2","3","4","5","6","7","8","9",".","x","y","z"];
+const hexOperands = [...operands, "A","B","C","D","E","F"];
+const operators = ["+","-","*","/","^","(",")"];
+const scientificOps = ["sin","cos","tan","asin","acos","atan","sqrt","ln","log10","pi","e","!"];
+const statisticsOps = ["mean","median","mode","std","perm","comb"];
+
+function updateButtons() {
+  operandButtons.innerHTML = "";
+  operatorButtons.innerHTML = "";
+  statdisplay.style.display = (mode.value === "statistics") ? "block" : "none";
+  document.getElementById("angleModeContainer").style.display = mode.value === 'scientific' ? 'block' : 'none';
+
+  let ops = (numeral.value === "hex") ? [...hexOperands] : [...operands];
+  if (numeral.value === "oct") ops = ops.filter(k => !["8","9","."].includes(k));
+  if (numeral.value === "bin") ops = ops.filter(k => ["0","1"].includes(k));
+
+  ops.forEach(k => {
+    const btn = document.createElement("button");
+    btn.textContent = k;
+btn.classList.add("clr");
+    btn.onclick = () => handleInput(k);
+    operandButtons.appendChild(btn);
+  });
+
+  let opsList = [...operators];
+  if (mode.value === "scientific") opsList.push(...scientificOps);
+  if (mode.value === "statistics") opsList.push(",", ...statisticsOps);
+
+  opsList.forEach(k => {
+    const btn = document.createElement("button");
+    btn.textContent = k;
+btn.classList.add("clr");
+    btn.onclick = () => handleInput(k);
+    operatorButtons.appendChild(btn);
+  });
+}
+
+function handleInput(val) {
+  if (val === "C") {
+    currentInput = "";
+    display.value = "";
+    statdisplay.value = "";
+    expressionDisplay.textContent = "";
+    return;
+  }
+  if (val === "←") {
+    currentInput = currentInput.slice(0, -1);
+    display.value = currentInput;
+    return;
+  }
+  if (val === "=") {
+    try {
+      const result = calculate(currentInput);
+      expressionDisplay.textContent = currentInput;
+      display.value = result;
+      currentInput = result.toString();
+      addToHistory(expressionDisplay.textContent, display.value);
+    } catch {
+      display.value = "Error";
+      currentInput = "";
+    }
+    return;
+  }
+  if (scientificOps.includes(val)) {
+    if (val === "pi") currentInput += "Math.PI";
+    else if (val === "e") currentInput += "Math.E";
+    else if (val === "!") currentInput += "!";
+    else currentInput += val + "(";
+  } else if (statisticsOps.includes(val)) {
+    try {
+      const nums = currentInput.split(",").map(n => parseFloat(n.trim())).filter(n => !isNaN(n));
+      const result = calculateStats(val, nums);
+      statdisplay.value = result;
+    } catch {
+      statdisplay.value = "Error";
+    }
+    return;
+  } else {
+    currentInput += val;
+  }
+  display.value = currentInput;
+}
+
+function factorial(n) {
+  n = parseInt(n);
+  if (isNaN(n) || n < 0) return NaN;
+  let res = 1;
+  for (let i = 2; i <= n; i++) res *= i;
+  return res;
+}
+
+function calculate(expr) {
+  const safeExpr = expr
+    .replace(/sin\(/g, angleMode.value === 'deg' ? "Math.sin(Math.PI/180*" : "Math.sin(")
+    .replace(/cos\(/g, angleMode.value === 'deg' ? "Math.cos(Math.PI/180*" : "Math.cos(")
+    .replace(/tan\(/g, angleMode.value === 'deg' ? "Math.tan(Math.PI/180*" : "Math.tan(")
+    .replace(/asin\(/g, "Math.asin(")
+    .replace(/acos\(/g, "Math.acos(")
+    .replace(/atan\(/g, "Math.atan(")
+    .replace(/sqrt\(/g, "Math.sqrt(")
+    .replace(/ln\(/g, "Math.log(")
+    .replace(/log10\(/g, "Math.log10(")
+    .replace(/(\d+)!/g, (_, n) => factorial(n))
+    .replace(/\^/g, "**");
+
+  let result = eval(safeExpr);
+  if (numeral.value === "hex") return parseInt(result).toString(16).toUpperCase();
+  if (numeral.value === "oct") return parseInt(result).toString(8);
+  if (numeral.value === "bin") return parseInt(result).toString(2);
+  return omitTrailingZeros(result);
+}
+
+function calculateStats(type, nums) {
+  switch (type) {
+    case "mean": return omitTrailingZeros(nums.reduce((a, b) => a + b) / nums.length);
+    case "median": nums.sort((a, b) => a - b);
+      const mid = Math.floor(nums.length / 2);
+      return omitTrailingZeros(nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2);
+    case "mode": const freq = {}; nums.forEach(n => freq[n] = (freq[n] || 0) + 1);
+      const maxFreq = Math.max(...Object.values(freq));
+      return Object.keys(freq).filter(k => freq[k] === maxFreq).join(", ");
+    case "std":
+      const mean = nums.reduce((a, b) => a + b) / nums.length;
+      return omitTrailingZeros(Math.sqrt(nums.reduce((s, v) => s + (v - mean) ** 2, 0) / nums.length));
+    case "perm": return omitTrailingZeros(factorial(nums[0]) / factorial(nums[0] - nums[1]));
+    case "comb": return omitTrailingZeros(factorial(nums[0]) / (factorial(nums[1]) * factorial(nums[0] - nums[1])));
+    default: throw new Error("Unknown stat type");
+  }
+}
+
+function omitTrailingZeros(num) {
+  return parseFloat(parseFloat(num).toFixed(12)).toString();
+}
+
+function copyToClipboard(val) {
+  navigator.clipboard.writeText(val).then(() => {
+    const modal = document.getElementById("copiedModal");
+    modal.style.display = "block";
+    setTimeout(() => modal.style.display = "none", 1000);
+  });
+}
+
+[mode, numeral, angleMode].forEach(ctrl => ctrl.addEventListener("change", () => {
+  updateButtons();
+  saveSettings();
+}));
+
+updateButtons();
+</script>
+
+</main>
+<br class="block">
+
+  <div class="clr-rev p-b-16 p-r-16 p-l-16 p-t-16 card-2" id="consent-banner" style=" position: fixed;bottom: 0;width: 100%;display: none;z-index: 9999;">
+    <div class="p-b-16">We use cookies to enhance your browsing experience.</div>
+    <button class="button b-1" id="grantButton">Allow</button>
+    <button class="button b-1" id="declineButton">Disallow</button>
+  </div>
+
+<script type="module" src="https://cdn.jsdelivr.net/gh/ikdao/ikdao@master/files/js/consent.js"></script>
+
+<script >
+(() => {
+  window.tgl = function(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('show');
+  };
+})();
+</script>
+<script>
+ /**
+ * Theme Select Script: Sets theme based on a <select> element.
+ * Applies data-theme="dark" or "light" to the body element.
+ * Uses localStorage to persist user preference.
+ */
+
+(function () {
+    const STORAGE_KEY = 'theme-preference';
+    const THEME_SELECT_ID = 'theme-select'; // *** Changed ID ***
+    const themeSelect = document.getElementById(THEME_SELECT_ID);
+
+    // --- Helper Functions ---
+
+    /** Get user preference from localStorage: 's', 'd', or 'l'. */
+    function getStoredPreference() {
+        return localStorage.getItem(STORAGE_KEY) || 's'; // Default to 's' (system)
+    }
+
+    /** Get the current actual theme: 'dark' or 'light'. */
+    function getActualTheme(preference) {
+        if (preference === 'd') return 'dark';
+        if (preference === 'l') return 'light';
+        // 's' (system) case: check OS preference
+        const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        return isSystemDark ? 'dark' : 'light';
+    }
+
+    /** Set the theme on the <body> element and the select state. */
+    function applyTheme(preference) {
+        const actualTheme = getActualTheme(preference);
+        
+        // 1. Update <body> data-theme
+        document.body.setAttribute('data-theme', actualTheme);
+
+        // 2. Update localStorage
+        localStorage.setItem(STORAGE_KEY, preference);
+
+        // 3. Update Select Element (set the chosen option as selected)
+        if (themeSelect) {
+            themeSelect.value = preference;
+        }
+    }
+
+    // --- Initialization & Event Listeners ---
+    
+    // Handler for when the select value changes
+    function handleThemeChange(event) {
+        const newPref = event.target.value;
+        applyTheme(newPref);
+    }
+
+    // 1. Initial Load: Apply the stored theme and set the select value.
+    const initialPreference = getStoredPreference();
+    applyTheme(initialPreference);
+
+    // 2. Event Listener for Select Changes
+    if (themeSelect) {
+        themeSelect.addEventListener('change', handleThemeChange);
+    }
+
+    // 3. Optional: Listen for system preference changes ONLY when the mode is 'system' ('s')
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+        if (getStoredPreference() === 's') {
+            // Only re-apply if the preference is still 's' (system)
+            const newActualTheme = e.matches ? 'dark' : 'light';
+            document.body.setAttribute('data-theme', newActualTheme);
+        }
+    });
+})();
+</script>
+
+<script>
+  function clock() { var e = (new Date).toLocaleDateString("en-us", { weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "numeric" }); document.getElementById("dateweb").innerHTML = e.toLocaleString("en-IN") }; const timeNow = setInterval((function () { clock() }), 50);
+</script>
+
+<script>
+  doctext = document.querySelector("meta[name='description']").content; function share() { navigator.share({ title: document.title, url: w.location.href, text: doctext }) };
+</script>
+<script>
+  function tgl(id) {
+    document.getElementById(id).classList.toggle('show');
+  };
+</script>
+<script>
+  const netState = document.getElementById("netstate"), netStatus = () => { netState.style.display = navigator.onLine ? "none" : "block" }; window.addEventListener("online", netStatus), netStatus(); window.addEventListener("offline", netStatus)
+</script>
+
+</body>
+</html>
